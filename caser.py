@@ -11,7 +11,7 @@ from torchmetrics import RetrievalHitRate
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from lit_model import LitModel
-from ml100k import LitDataModule
+from ml100k import LitDataModule, ML100KSequence
 from utils import bpr_loss
 
 
@@ -56,15 +56,68 @@ class Caser(nn.Module):
         return logit
 
 
-# for code dev
-# if __name__ == "__main__":
-#     model = Caser(28, 15, 20)
-#     user_id = torch.tensor([10, 0, 4, 2])
-#     seq = torch.tensor([
-#         [0, 0, 2, 1, 0],
-#         [1, 2, 3, 6, 0],
-#         [0, 8, 2, 1, 7],
-#         [9, 3, 5, 3, 0]
-#     ])
-#     item_id = torch.tensor([0, 1, 2, 3])
-#     model(user_id, seq, item_id)
+class LitCaser(pl.LightningModule):
+    def __init__(self, lr=0.002, hitrate_cutout=10, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+        self.model = Caser(**kwargs)
+        self.lr = lr
+        self.hitrate = RetrievalHitRate(k=hitrate_cutout)
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), self.lr, weight_decay=1e-5)
+
+    def forward(self, user_id, seq, item_id):
+        return self.model(user_id, seq, item_id)
+
+    def training_step(self, batch, batch_idx):
+        user_id, seq, pos_item, neg_item = batch
+        pos_logit = self(user_id, seq, pos_item)
+        neg_logit = self(user_id, seq, neg_item)
+        loss = bpr_loss(pos_logit, neg_logit)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        user_id, seq, item_id, is_pos = batch
+        logit = self(user_id, seq, item_id)
+        score = torch.sigmoid(logit).reshape(-1,)
+        self.hitrate.update(score, is_pos, user_id)
+        return
+
+    def training_epoch_end(self, outputs):
+        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
+        self.logger.experiment.add_scalar(
+            "train/loss", avg_loss, self.current_epoch)
+
+    def validation_epoch_end(self, outputs):
+        self.logger.experiment.add_scalar(
+            f"val/hit_rate@{self.hitrate.k}",
+            self.hitrate.compute(),
+            self.current_epoch)
+        self.hitrate.reset()
+
+
+def main(args):
+    data = LitDataModule(
+        ML100KSequence(seq_len=args.seq_len),
+        batch_size=args.batch_size)
+    data.setup()
+    model = LitCaser(
+        num_users=data.num_users, num_items=data.num_items,
+        embedding_dims=args.embedding_dims,
+        seq_len=args.seq_len)
+
+    logger = TensorBoardLogger("lightning_logs",
+                               name=f"Caser_{args.embedding_dims}_L{args.seq_len}")
+    trainer = pl.Trainer.from_argparse_args(args, logger=logger)
+    trainer.fit(model, data)
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument("--embedding_dims", type=int, default=10)
+    parser.add_argument("--seq_len", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=1024)
+    pl.Trainer.add_argparse_args(parser)
+    args = parser.parse_args()
+    main(args)

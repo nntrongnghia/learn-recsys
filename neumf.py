@@ -87,11 +87,10 @@ class LitNeuMF(pl.LightningModule):
 
 def main(args):
     data = LitDataModule(
-        ML100KPairWise(seq_test_sample_size=100),
+        ML100KPairWise(test_sample_size=100),
         batch_size=args.batch_size)
     data.setup()
     model = LitNeuMF(
-        sparse=False,
         num_users=data.num_users, num_items=data.num_items,
         embedding_dims=args.embedding_dims,
         hidden_dims=[10, 10, 10]

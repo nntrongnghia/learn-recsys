@@ -11,9 +11,9 @@ def bpr_loss(pos: torch.Tensor, neg: torch.Tensor)-> torch.Tensor:
     Parameters
     ----------
     pos : torch.Tensor
-        Ranking score (0..1)
+        Ranking logit (0..1)
     neg : torch.Tensor
-        Ranking score (0..1)
+        Ranking logit (0..1)
     
     Return
     ------

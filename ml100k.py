@@ -4,6 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
+from torch import unbind
 from torch.utils.data import DataLoader, Dataset, random_split
 
 
@@ -69,21 +70,19 @@ class ML100KRatingMatrix(ML100K):
 class ML100KPairWise(ML100K):
     def __init__(self, data_dir="./ml-100k", 
                  test_leave_out=1,
-                 seq_test_sample_size=None):
+                 test_sample_size=None):
         super().__init__(data_dir)
         self.set_all_item_ids = set(np.unique(self.item_id))
-        # for training
-        self.observed_items_per_user = None
-        self.unobserved_items_per_user = None
-        # for testing
         self.test_leave_out = test_leave_out
-        self.seq_test_sample_size = seq_test_sample_size
-        self.gt_pos_items_per_user = None
+        self.test_sample_size = test_sample_size
         # general
         self.train = None
         self.has_setup = False
+        # Split Dataframe
+        self.split_dataframe()
+        self.build_candidates()
 
-    def split(self, *args, **kwargs):
+    def split_dataframe(self):
         user_group = self.df.groupby("user_id", sort=False)
         train_df = []
         test_df = []
@@ -91,40 +90,47 @@ class ML100KPairWise(ML100K):
             user_df = user_df.sort_values("timestamp")
             train_df.append(user_df[:-self.test_leave_out])
             test_df.append(user_df[-self.test_leave_out:])
-        train_df = pd.concat(train_df)
-        test_df = pd.concat(test_df)
-        # Train split
-        train_split = deepcopy(self)
-        train_split.user_id = train_df.user_id.values
-        train_split.item_id = train_df.item_id.values
-        train_split.observed_items_per_user = {
+        self.train_df = pd.concat(train_df)
+        self.test_df = pd.concat(test_df)
+
+    def build_candidates(self):
+        # Train
+        self.observed_items_per_user_in_train = {
             int(user_id): user_df.item_id.values
-            for user_id, user_df in train_df.groupby("user_id", sort=False)
+            for user_id, user_df in self.train_df.groupby("user_id", sort=False)
         }
-        train_split.unobserved_items_per_user = {
+        self.unobserved_items_per_user_in_train = {
             user_id: np.array(
                 list(self.set_all_item_ids - set(observed_items)))
-            for user_id, observed_items in train_split.observed_items_per_user.items()
+            for user_id, observed_items in self.observed_items_per_user_in_train.items()
         }
+        # Test
+        self.gt_pos_items_per_user_in_test = {
+            int(user_id): user_df[-self.test_leave_out:].item_id.values
+            for user_id, user_df in self.test_df.groupby("user_id", sort=False)
+        }
+
+
+    def split(self, *args, **kwargs):
+        # Train split
+        train_split = deepcopy(self)
+        train_split.user_id = self.train_df.user_id.values
+        train_split.item_id = self.train_df.item_id.values
         train_split.train = True
         train_split.has_setup = True
         # Test split
         test_split = deepcopy(self)
         test_split.user_id = []
         test_split.item_id = []
-        test_split.gt_pos_items_per_user = {
-            int(user_id): user_df.item_id.values
-            for user_id, user_df in test_df.groupby("user_id", sort=False)
-        }
-        for user_id, items in train_split.unobserved_items_per_user.items():
-            if self.seq_test_sample_size is None:
+        for user_id, items in self.unobserved_items_per_user_in_train.items():
+            if self.test_sample_size is None:
                 sample_items = items
-            elif isinstance(self.seq_test_sample_size, int):
-                sample_items = np.random.choice(items, self.seq_test_sample_size)
+            elif isinstance(self.test_sample_size, int):
+                sample_items = np.random.choice(items, self.test_sample_size)
             else:
-                raise TypeError("self.seq_test_sample_size should be int")
+                raise TypeError("self.test_sample_size should be int")
             sample_items = np.concatenate(
-                [test_split.gt_pos_items_per_user[user_id],
+                [test_split.gt_pos_items_per_user_in_test[user_id],
                  sample_items])
             sample_items = np.unique(sample_items)
             test_split.user_id += [user_id]*len(sample_items)
@@ -133,7 +139,6 @@ class ML100KPairWise(ML100K):
         test_split.item_id = np.concatenate(test_split.item_id)
         test_split.train = False
         test_split.has_setup = True
-
         return train_split, test_split
 
     def __len__(self):
@@ -145,13 +150,109 @@ class ML100KPairWise(ML100K):
             user_id = self.user_id[idx]
             pos_item = self.item_id[idx]
             neg_item = np.random.choice(
-                self.unobserved_items_per_user[int(user_id)])
+                self.unobserved_items_per_user_in_train[int(user_id)])
             return user_id, pos_item, neg_item
         else:
             user_id = self.user_id[idx]
             item_id = self.item_id[idx]
-            is_pos = item_id in self.gt_pos_items_per_user[user_id]
+            is_pos = item_id in self.gt_pos_items_per_user_in_test[user_id]
             return user_id, item_id, is_pos
+
+
+class ML100KSequence(ML100KPairWise):
+    def __init__(self, data_dir="./ml-100k", 
+                 test_leave_out=1,
+                 test_sample_size=100,
+                 seq_len=5):
+        self.seq_len = seq_len
+        super().__init__(data_dir, test_leave_out, test_sample_size)
+        self.getitem_df = None
+
+    def split_dataframe(self):
+        user_group = self.df.groupby("user_id", sort=False)
+        train_df = []
+        test_df = []
+        for user_id, user_df in user_group:
+            user_df = user_df.sort_values("timestamp")
+            train_df.append(user_df[:-self.test_leave_out])
+            test_df.append(user_df[-(self.test_leave_out+self.seq_len):])
+        self.train_df = pd.concat(train_df)
+        self.test_df = pd.concat(test_df)
+
+    def split(self, *args, **kwargs):
+        # Train        
+        train_split = deepcopy(self)
+        df = []
+        for _, user_df in self.train_df.groupby("user_id", sort=False):
+            user_df = user_df.sort_values("timestamp").reset_index()
+            user_id = user_df.user_id[:-self.seq_len].values
+            target = user_df.item_id[self.seq_len:].values
+            seq = [
+                user_df.item_id[i:i+self.seq_len].values
+                for i in range(len(user_df) - self.seq_len)]
+            df.append(
+                pd.DataFrame({
+                    "user_id": user_id,
+                    "seq": seq,
+                    "target_item": target}))
+        train_split.getitem_df = pd.concat(df).reset_index()
+        train_split.train = True
+
+        # Test
+        test_split = deepcopy(self)
+        df = []
+        for uid, user_df in self.test_df.groupby("user_id", sort=False):
+            user_df = user_df.sort_values("timestamp").reset_index()
+            user_id = user_df.user_id[:-self.seq_len].values
+            seq = [
+                user_df.item_id[i:i+self.seq_len].values
+                for i in range(len(user_df) - self.seq_len)]
+            target_per_seq = user_df.item_id[self.seq_len:].values
+            unobserved_item_id = np.concatenate([
+                np.random.choice(
+                    self.unobserved_items_per_user_in_train[uid],
+                    self.test_sample_size, 
+                    replace=self.test_sample_size>self.unobserved_items_per_user_in_train[uid].shape[0]),
+            ])
+            item_id_per_seq = [
+                np.unique(np.append(unobserved_item_id, target))
+                for target in target_per_seq
+            ]
+            user_id = np.concatenate([
+                np.repeat(u, len(item_id))
+                for u, item_id in zip(user_id, item_id_per_seq)
+            ])
+            seq = np.concatenate([
+                np.repeat(s.reshape(1, -1), len(item_id), 0)
+                for s, item_id in zip(seq, item_id_per_seq)
+            ])
+            item_id = np.concatenate(item_id_per_seq)
+            is_pos = np.isin(item_id, target_per_seq)
+            df.append(
+                pd.DataFrame({
+                    "user_id": user_id,
+                    "seq": list(seq),
+                    "item_id": item_id,
+                    "is_pos": is_pos}))
+        test_split.getitem_df = pd.concat(df).reset_index()
+        test_split.train = False
+        return train_split, test_split
+
+    def __len__(self):
+        assert self.getitem_df is not None
+        return len(self.getitem_df)
+
+    def __getitem__(self, idx):
+        assert self.getitem_df is not None
+        row = self.getitem_df.iloc[idx]
+        if self.train:
+            neg_item = np.random.choice(self.unobserved_items_per_user_in_train[int(row.user_id)])
+            return row.user_id, row.seq, row.target_item, neg_item
+        else:
+            return row.user_id, row.seq, row.item_id, row.is_pos
+
+
+        
 
 
 class LitDataModule(pl.LightningDataModule):
@@ -183,7 +284,7 @@ class LitDataModule(pl.LightningDataModule):
 
 if __name__ == "__main__":
     import d2l.mxnet as d2l
-    dataset = ML100K()
+    dataset = ML100KSequence()
     dm = LitDataModule(dataset)
     dm.setup()
 
