@@ -10,6 +10,7 @@ from torchmetrics import MeanSquaredError
 from ml100k import LitML100K
 
 class LitModel(pl.LightningModule):
+    """Template Lightning Module to train model"""
     def __init__(self, model_class, lr=0.002, **kwargs):
         super().__init__()
         self.save_hyperparameters()
@@ -53,5 +54,6 @@ class LitModel(pl.LightningModule):
         avg_loss = torch.stack(outputs).mean()
         self.logger.experiment.add_scalar("val/loss", avg_loss, self.current_epoch)
         self.logger.experiment.add_scalar("val/rsme", self.rmse.compute(), self.current_epoch)
+        self.rmse.reset()
 
 

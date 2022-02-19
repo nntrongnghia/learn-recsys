@@ -12,15 +12,15 @@ from ml100k import LitML100K
 
 
 class MatrixFactorization(nn.Module):
-    def __init__(self, num_features, num_users, num_items, 
+    def __init__(self, embedding_dims, num_users, num_items, 
                  sparse=False, **kwargs):
         super().__init__()
         self.sparse = sparse
         
-        self.user_embedding = nn.Embedding(num_users, num_features, sparse=sparse)
+        self.user_embedding = nn.Embedding(num_users, embedding_dims, sparse=sparse)
         self.user_bias = nn.Embedding(num_users, 1, sparse=sparse)
         
-        self.item_embedding = nn.Embedding(num_items, num_features, sparse=sparse)
+        self.item_embedding = nn.Embedding(num_items, embedding_dims, sparse=sparse)
         self.item_bias = nn.Embedding(num_items, 1, sparse=sparse) 
 
         for param in self.parameters():
@@ -55,9 +55,9 @@ def main(args):
     data.setup()
     model = LitMF(MatrixFactorization, sparse=False, 
         num_users=data.num_users, num_items=data.num_items,
-        num_features=args.num_features)
+        embedding_dims=args.embedding_dims)
     
-    logger = TensorBoardLogger("lightning_logs", name=f"MF_{args.num_features}")
+    logger = TensorBoardLogger("lightning_logs", name=f"MF_{args.embedding_dims}")
     trainer = pl.Trainer.from_argparse_args(args, logger=logger)
 
     trainer.fit(model, data)
@@ -66,7 +66,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--num_features", type=int, default=30)
+    parser.add_argument("--embedding_dims", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=512)
     pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()

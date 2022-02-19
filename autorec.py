@@ -8,18 +8,18 @@ import torch.nn.functional as F
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from lit_model import LitModel
-from ml100k import LitML100K, ML100KRatingMatrix
+from ml100k import LitML100K
 
 
 class AutoRec(nn.Module):
-    def __init__(self, num_features, input_dim, dropout=0.05):
+    def __init__(self, embedding_dims, input_dim, dropout=0.05):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, num_features),
+            nn.Linear(input_dim, embedding_dims),
             nn.Sigmoid(),
             nn.Dropout(dropout)
         )
-        self.decoder = nn.Linear(num_features, input_dim)
+        self.decoder = nn.Linear(embedding_dims, input_dim)
         for param in self.parameters():
             nn.init.normal_(param, std=0.01)
 
@@ -48,16 +48,16 @@ def main(args):
     model = LitAutoRec(AutoRec, 
             lr=0.01,
             input_dim=data.num_users,
-            num_features=args.num_features)
+            embedding_dims=args.embedding_dims)
     
-    logger = TensorBoardLogger("lightning_logs", name=f"AutoRec_{args.num_features}")
+    logger = TensorBoardLogger("lightning_logs", name=f"AutoRec_{args.embedding_dims}")
     trainer = pl.Trainer.from_argparse_args(args, logger=logger)
     trainer.fit(model, data)
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--num_features", type=int, default=500)
+    parser.add_argument("--embedding_dims", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=256)
     pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
