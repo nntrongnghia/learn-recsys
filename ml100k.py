@@ -1,6 +1,7 @@
+from abc import ABC, abstractmethod
 from copy import deepcopy
 import os
-
+from typing import Tuple
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
@@ -14,8 +15,34 @@ def read_data_ml100k(data_dir="./ml-100k") -> pd.DataFrame:
     return data
 
 
-class ML100K(Dataset):
+class BaseML100K(Dataset, ABC):
+    @abstractmethod
+    def split(self, *args, **kwargs) -> Tuple[Dataset, Dataset]:
+        """Split the dataset into train split
+        and test/validation split
+
+        Returns
+        -------
+        Tuple[Dataset, Dataset]
+            Two Dataset instances for training and validation/testing
+        """
+
+
+class ML100K(BaseML100K):
     def __init__(self, data_dir="./ml-100k", normalize_rating=False):
+        """MovieLens 100K for Matrix Factorization
+        Each sample is a tuple of:
+        - user_id: int
+        - item_id: int
+        - rating: float
+
+        Parameters
+        ----------
+        data_dir : str, optional
+            Path to dataset directory, by default "./ml-100k"
+        normalize_rating : bool, optional
+            If True, rating is normalized to (0..1), by default False
+        """
         self.normalize_rating = normalize_rating
         self.data_dir = data_dir
         self.df = read_data_ml100k(data_dir)
@@ -35,7 +62,7 @@ class ML100K(Dataset):
         train_len = int(train_ratio*len(self))
         test_len = len(self) - train_len
         return random_split(self, [train_len, test_len])
-        
+
     def __len__(self):
         return len(self.df)
 
@@ -45,6 +72,21 @@ class ML100K(Dataset):
 
 class ML100KRatingMatrix(ML100K):
     def __init__(self, data_dir="./ml-100k", user_based=False, normalize_rating=False):
+        """MovieLens 100K for AutoRec
+        Each sample is a row/column of the rating matrix.
+        The rating matrix has shape (number of items, number of users).
+
+        Parameters
+        ----------
+        data_dir : str, optional
+            _description_, by default "./ml-100k"
+        user_based : bool, optional
+            If True, extract columns of the rating matrix.
+            else, extract rows.
+            By default False
+        normalize_rating : bool, optional
+            If True, divide rating by 5, by default False
+        """
         super().__init__(data_dir)
         self.normalize_rating = normalize_rating
         self.user_based = user_based
@@ -68,9 +110,41 @@ class ML100KRatingMatrix(ML100K):
 
 
 class ML100KPairWise(ML100K):
-    def __init__(self, data_dir="./ml-100k", 
+    def __init__(self, data_dir="./ml-100k",
                  test_leave_out=1,
-                 test_sample_size=None):
+                 test_sample_size:int=None):
+        """Pair Wise loader to train NeuMF model.
+        Samples are slightly different based on train/test mode.
+        
+        In training mode:
+        - user_id: int
+        - item_id: int
+            Item id that user has interacted with
+        - neg_item: int
+            Item id that user hasn't interacted with while training
+        
+        In testing mode:
+        - user_id: int
+        - item_id: int
+            Random item_id to be ranked by the model
+        - is_pos: bool
+            If True, this item is a positive item 
+            that user has interacted with in groundtruth data.
+
+
+        Parameters
+        ----------
+        data_dir : str, optional
+            Path to dataset directory, by default "./ml-100k"
+        test_leave_out : int, optional
+            Leave out how many items per user for testing
+            By default 1
+        test_sample_size : int, optional
+            It is time-consuming to rank all items for every user during
+            evaluation, we can randomly choose a subset of items to rank
+            If None, rank all items.
+            By default None
+        """
         super().__init__(data_dir)
         self.set_all_item_ids = set(np.unique(self.item_id))
         self.test_leave_out = test_leave_out
@@ -83,6 +157,9 @@ class ML100KPairWise(ML100K):
         self.build_candidates()
 
     def split_dataframe(self):
+        """Split ML100K dataframe with the strategy leave-n-out
+        with timestamp order.
+        """
         user_group = self.df.groupby("user_id", sort=False)
         train_df = []
         test_df = []
@@ -109,7 +186,6 @@ class ML100KPairWise(ML100K):
             int(user_id): user_df[-self.test_leave_out:].item_id.values
             for user_id, user_df in self.test_df.groupby("user_id", sort=False)
         }
-
 
     def split(self, *args, **kwargs):
         # Train split
@@ -160,10 +236,47 @@ class ML100KPairWise(ML100K):
 
 
 class ML100KSequence(ML100KPairWise):
-    def __init__(self, data_dir="./ml-100k", 
+    def __init__(self, data_dir="./ml-100k",
                  test_leave_out=1,
                  test_sample_size=100,
                  seq_len=5):
+        """Sequence data to train Caser model
+        Similarly to Pair Wise dataset, the sample depends on train/test mode.
+
+        In training mode:
+        - user_id: int
+        - seq: List[int]
+            Sequence of last N item ids that user has interacted with.
+        - target_item: int
+            Target item id that user will interact with after the sequence
+        - neg_item: int
+            Item id that user doesn't interacted with while training
+        
+        In testing mode:
+        - user_id: int
+        - seq: List[int]
+            Sequence of last N item ids that user has interacted with.
+        - item_id: int
+            Random item_id to be ranked by the model
+        - is_pos: bool
+            If True, this item is a positive item 
+            that user has interacted with in groundtruth data.
+
+        Parameters
+        ----------
+        data_dir : str, optional
+            Path to dataset directory, by default "./ml-100k"
+        test_leave_out : int, optional
+            Leave out how many items per user for testing
+            By default 1
+        test_sample_size : int, optional
+            It is time-consuming to rank all items for every user during
+            evaluation, we can randomly choose a subset of items to rank
+            If None, rank all items.
+            By default None
+        seq_len : int, optional
+            Length of sequence of item ids, by default 5
+        """
         self.seq_len = seq_len
         super().__init__(data_dir, test_leave_out, test_sample_size)
         self.getitem_df = None
@@ -180,7 +293,7 @@ class ML100KSequence(ML100KPairWise):
         self.test_df = pd.concat(test_df)
 
     def split(self, *args, **kwargs):
-        # Train        
+        # Train
         train_split = deepcopy(self)
         df = []
         for _, user_df in self.train_df.groupby("user_id", sort=False):
@@ -211,8 +324,8 @@ class ML100KSequence(ML100KPairWise):
             unobserved_item_id = np.concatenate([
                 np.random.choice(
                     self.unobserved_items_per_user_in_train[uid],
-                    self.test_sample_size, 
-                    replace=self.test_sample_size>self.unobserved_items_per_user_in_train[uid].shape[0]),
+                    self.test_sample_size,
+                    replace=self.test_sample_size > self.unobserved_items_per_user_in_train[uid].shape[0]),
             ])
             item_id_per_seq = [
                 np.unique(np.append(unobserved_item_id, target))
@@ -246,19 +359,32 @@ class ML100KSequence(ML100KPairWise):
         assert self.getitem_df is not None
         row = self.getitem_df.iloc[idx]
         if self.train:
-            neg_item = np.random.choice(self.unobserved_items_per_user_in_train[int(row.user_id)])
+            neg_item = np.random.choice(
+                self.unobserved_items_per_user_in_train[int(row.user_id)])
             return row.user_id, row.seq, row.target_item, neg_item
         else:
             return row.user_id, row.seq, row.item_id, row.is_pos
 
 
-        
-
-
 class LitDataModule(pl.LightningDataModule):
-    def __init__(self, dataset: ML100K,
+    def __init__(self, dataset: BaseML100K,
                  train_ratio=0.8, batch_size=32,
                  num_workers=2, prefetch_factor=16):
+        """DataModule for PyTorch Lightning
+
+        Parameters
+        ----------
+        dataset : BaseML100K
+        train_ratio : float, optional
+            By default 0.8
+        batch_size : int, optional
+            By default 32
+        num_workers : int, optional
+            Number of multi-CPU to fetch data
+            By default 2
+        prefetch_factor : int, optional
+            Number of batches to prefecth, by default 16
+        """
         self.dataset = dataset
         self.train_ratio = train_ratio
         self.dataloader_kwargs = {
@@ -270,7 +396,8 @@ class LitDataModule(pl.LightningDataModule):
     def setup(self):
         self.num_users = self.dataset.num_users
         self.num_items = self.dataset.num_items
-        self.train_split, self.test_split = self.dataset.split(self.train_ratio)
+        self.train_split, self.test_split = self.dataset.split(
+            self.train_ratio)
 
     def train_dataloader(self):
         return DataLoader(self.train_split, **self.dataloader_kwargs, shuffle=True)
@@ -280,21 +407,3 @@ class LitDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_split, **self.dataloader_kwargs, shuffle=False)
-
-
-if __name__ == "__main__":
-    import d2l.mxnet as d2l
-    dataset = ML100KSequence()
-    dm = LitDataModule(dataset)
-    dm.setup()
-
-    # df = read_data_ml100k()
-    # num_users = df.user_id.unique().shape[0]
-    # num_items = df.item_id.unique().shape[0]
-    # train_data, test_data = d2l.split_data_ml100k(df, num_users, num_items,
-    #                                               'seq-aware')
-    # users_train, items_train, ratings_train, candidates = d2l.load_data_ml100k(
-    #     train_data, num_users, num_items, feedback="implicit")
-    # users_test, items_test, ratings_test, test_iter = d2l.load_data_ml100k(
-    #     test_data, num_users, num_items, feedback="implicit")
-    print("HOLD")
