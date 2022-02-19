@@ -130,4 +130,6 @@ dmypy.json
 
 
 ml-100k
+ctr
 lightning_logs
+*.zip
