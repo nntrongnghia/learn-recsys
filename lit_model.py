@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchmetrics import MeanSquaredError
 
-from ml100k import LitML100K
+from ml100k import LitDataModule
 
 class LitModel(pl.LightningModule):
     """Template Lightning Module to train model"""

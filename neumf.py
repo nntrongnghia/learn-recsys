@@ -11,7 +11,7 @@ from torchmetrics import RetrievalHitRate
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from lit_model import LitModel
-from ml100k import LitML100K
+from ml100k import LitDataModule, ML100KPairWise
 from utils import bpr_loss
 
 
@@ -86,11 +86,9 @@ class LitNeuMF(pl.LightningModule):
 
 
 def main(args):
-    data = LitML100K(
-        batch_size=args.batch_size,
-        return_pair_wise=True,
-        sequence_aware=True,
-        seq_test_sample_size=100)
+    data = LitDataModule(
+        ML100KPairWise(seq_test_sample_size=100),
+        batch_size=args.batch_size)
     data.setup()
     model = LitNeuMF(
         sparse=False,

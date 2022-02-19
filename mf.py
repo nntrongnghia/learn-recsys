@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from lit_model import LitModel
-from ml100k import LitML100K
+from ml100k import ML100K, LitDataModule
 
 
 class MatrixFactorization(nn.Module):
@@ -51,7 +51,8 @@ class LitMF(LitModel):
 
 
 def main(args):
-    data = LitML100K(batch_size=args.batch_size)
+
+    data = LitDataModule(ML100K(), batch_size=args.batch_size)
     data.setup()
     model = LitMF(MatrixFactorization, sparse=False, 
         num_users=data.num_users, num_items=data.num_items,

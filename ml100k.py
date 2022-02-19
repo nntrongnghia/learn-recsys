@@ -12,48 +12,6 @@ def read_data_ml100k(data_dir="./ml-100k") -> pd.DataFrame:
     data = pd.read_csv(os.path.join(data_dir, 'u.data'), '\t', names=names)
     return data
 
-# train_idx = np.random.choice(len(dataset), train_len, replace=False)
-# train_mask = np.array([False]*len(dataset))
-# train_mask[train_idx] = True
-
-# train_split = deepcopy(dataset)
-# train_split.user_id = dataset.user_id[train_mask]
-# train_split.item_id = dataset.item_id[train_mask]
-# train_split.setup()
-
-# test_mask = ~train_mask
-# test_split = deepcopy(dataset)
-# test_split.user_id = dataset.user_id[test_mask]
-# test_split.item_id = dataset.item_id[test_mask]
-# test_split.setup()
-
-
-def split_dataset(dataset: Dataset, train_ratio=0.8, sequence_aware=False, test_seq_len=1):
-    if sequence_aware:
-        if isinstance(dataset, ML100KPairWise):
-            user_group = dataset.df.groupby("user_id", sort=False)
-            train_df = []
-            test_df = []
-            for user_id, user_df in user_group:
-                user_df = user_df.sort_values("timestamp")
-                train_df.append(user_df[:-test_seq_len])
-                test_df.append(user_df[-test_seq_len:])
-            train_df = pd.concat(train_df)
-            test_df = pd.concat(test_df)
-            train_split, test_split = dataset.setup(train_df, test_df)
-        else:
-            raise NotImplementedError("Not yet implemented")
-    else:
-        if isinstance(dataset, ML100KPairWise):
-            raise ValueError(
-                "ML100KPairWise supports only sequence aware split mode, for now :)")
-        else:
-            train_len = int(train_ratio*len(dataset))
-            test_len = len(dataset) - train_len
-            train_split, test_split = random_split(
-                dataset, [train_len, test_len])
-    return train_split, test_split
-
 
 class ML100K(Dataset):
     def __init__(self, data_dir="./ml-100k", normalize_rating=False):
@@ -72,6 +30,11 @@ class ML100K(Dataset):
         self.rating = self.df.rating.values.astype(np.float32)
         self.timestamp = self.df.timestamp
 
+    def split(self, train_ratio=0.8):
+        train_len = int(train_ratio*len(self))
+        test_len = len(self) - train_len
+        return random_split(self, [train_len, test_len])
+        
     def __len__(self):
         return len(self.df)
 
@@ -104,20 +67,33 @@ class ML100KRatingMatrix(ML100K):
 
 
 class ML100KPairWise(ML100K):
-    def __init__(self, data_dir="./ml-100k", seq_test_sample_size=None):
+    def __init__(self, data_dir="./ml-100k", 
+                 test_leave_out=1,
+                 seq_test_sample_size=None):
         super().__init__(data_dir)
         self.set_all_item_ids = set(np.unique(self.item_id))
         # for training
         self.observed_items_per_user = None
         self.unobserved_items_per_user = None
         # for testing
+        self.test_leave_out = test_leave_out
         self.seq_test_sample_size = seq_test_sample_size
         self.gt_pos_items_per_user = None
         # general
         self.train = None
         self.has_setup = False
 
-    def setup(self, train_df, test_df):
+    def split(self, *args, **kwargs):
+        user_group = self.df.groupby("user_id", sort=False)
+        train_df = []
+        test_df = []
+        for user_id, user_df in user_group:
+            user_df = user_df.sort_values("timestamp")
+            train_df.append(user_df[:-self.test_leave_out])
+            test_df.append(user_df[-self.test_leave_out:])
+        train_df = pd.concat(train_df)
+        test_df = pd.concat(test_df)
+        # Train split
         train_split = deepcopy(self)
         train_split.user_id = train_df.user_id.values
         train_split.item_id = train_df.item_id.values
@@ -132,7 +108,7 @@ class ML100KPairWise(ML100K):
         }
         train_split.train = True
         train_split.has_setup = True
-
+        # Test split
         test_split = deepcopy(self)
         test_split.user_id = []
         test_split.item_id = []
@@ -178,25 +154,11 @@ class ML100KPairWise(ML100K):
             return user_id, item_id, is_pos
 
 
-class LitML100K(pl.LightningDataModule):
-    def __init__(self, data_dir="./ml-100k",
-                 return_rating_matrix=False,
-                 return_pair_wise=False,
-                 normalize_rating=False,
-                 sequence_aware=False,
-                 test_seq_len=1,
-                 seq_test_sample_size=None,
+class LitDataModule(pl.LightningDataModule):
+    def __init__(self, dataset: ML100K,
                  train_ratio=0.8, batch_size=32,
                  num_workers=2, prefetch_factor=16):
-        self.sequence_aware = sequence_aware
-        self.seq_test_sample_size = seq_test_sample_size
-        self.test_seq_len = test_seq_len  # for sequence aware split
-        self.return_pair_wise = return_pair_wise
-        self.return_rating_matrix = return_rating_matrix
-        assert not (
-            return_rating_matrix and return_pair_wise), "These two can not be True simultaneously."
-        self.normalize_rating = normalize_rating
-        self.data_dir = data_dir
+        self.dataset = dataset
         self.train_ratio = train_ratio
         self.dataloader_kwargs = {
             "batch_size": batch_size,
@@ -205,17 +167,9 @@ class LitML100K(pl.LightningDataModule):
         }
 
     def setup(self):
-        if self.return_rating_matrix:
-            self.data = ML100KRatingMatrix(
-                self.data_dir, self.normalize_rating)
-        elif self.return_pair_wise:
-            self.data = ML100KPairWise(self.data_dir, self.seq_test_sample_size)
-        else:
-            self.data = ML100K(self.data_dir, self.normalize_rating)
-        self.num_users = self.data.num_users
-        self.num_items = self.data.num_items
-        self.train_split, self.test_split = split_dataset(
-            self.data, self.train_ratio, self.sequence_aware, self.test_seq_len)
+        self.num_users = self.dataset.num_users
+        self.num_items = self.dataset.num_items
+        self.train_split, self.test_split = self.dataset.split(self.train_ratio)
 
     def train_dataloader(self):
         return DataLoader(self.train_split, **self.dataloader_kwargs, shuffle=True)
@@ -229,16 +183,17 @@ class LitML100K(pl.LightningDataModule):
 
 if __name__ == "__main__":
     import d2l.mxnet as d2l
-    dm = LitML100K(return_pair_wise=True, sequence_aware=True)
+    dataset = ML100K()
+    dm = LitDataModule(dataset)
     dm.setup()
 
-    df = read_data_ml100k()
-    num_users = df.user_id.unique().shape[0]
-    num_items = df.item_id.unique().shape[0]
-    train_data, test_data = d2l.split_data_ml100k(df, num_users, num_items,
-                                                  'seq-aware')
-    users_train, items_train, ratings_train, candidates = d2l.load_data_ml100k(
-        train_data, num_users, num_items, feedback="implicit")
-    users_test, items_test, ratings_test, test_iter = d2l.load_data_ml100k(
-        test_data, num_users, num_items, feedback="implicit")
+    # df = read_data_ml100k()
+    # num_users = df.user_id.unique().shape[0]
+    # num_items = df.item_id.unique().shape[0]
+    # train_data, test_data = d2l.split_data_ml100k(df, num_users, num_items,
+    #                                               'seq-aware')
+    # users_train, items_train, ratings_train, candidates = d2l.load_data_ml100k(
+    #     train_data, num_users, num_items, feedback="implicit")
+    # users_test, items_test, ratings_test, test_iter = d2l.load_data_ml100k(
+    #     test_data, num_users, num_items, feedback="implicit")
     print("HOLD")

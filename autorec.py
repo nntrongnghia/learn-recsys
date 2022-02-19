@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from lit_model import LitModel
-from ml100k import LitML100K
+from ml100k import LitDataModule, ML100KRatingMatrix
 
 
 class AutoRec(nn.Module):
@@ -43,7 +43,7 @@ class LitAutoRec(LitModel):
 
 
 def main(args):
-    data = LitML100K(batch_size=args.batch_size, return_rating_matrix=True)
+    data = LitDataModule(ML100KRatingMatrix(), batch_size=args.batch_size)
     data.setup()
     model = LitAutoRec(AutoRec, 
             lr=0.01,

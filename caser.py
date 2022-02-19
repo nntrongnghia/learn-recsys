@@ -11,7 +11,7 @@ from torchmetrics import RetrievalHitRate
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from lit_model import LitModel
-from ml100k import LitML100K
+from ml100k import LitDataModule
 from utils import bpr_loss
 
 
