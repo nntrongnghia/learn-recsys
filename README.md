@@ -19,8 +19,8 @@ Download these dataset and unzip in the root of this directory:
 5. Personalized Ranking for Recommender Systems: [`utils.py`](utils.py). For now, only the BRP loss function is implemented.
 6. Neural Collaborative Filtering for Personalized Ranking: [`neumf.py`](neumf.py)
 7. Sequence-Aware Recommender Systems: [`caser.py`](caser.py)
-8. Feature-Rich Recommender Systems: 
-9. Factorization Machines:
+8. Feature-Rich Recommender Systems: [`ctr.py`](ctr.py) contains dataloaders for CTR dataset
+9. Factorization Machines: [`fm.py`](fm.py)
 10. Deep Factorization Machines: 
 
 ## Usage

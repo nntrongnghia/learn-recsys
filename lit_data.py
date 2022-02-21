@@ -43,8 +43,8 @@ class LitDataModule(pl.LightningDataModule):
         }
 
     def setup(self):
-        self.num_users = self.dataset.num_users
-        self.num_items = self.dataset.num_items
+        self.num_users = getattr(self.dataset, "num_users", None)
+        self.num_items = getattr(self.dataset, "num_items", None)
         self.train_split, self.test_split = self.dataset.split(
             self.train_ratio)
 
