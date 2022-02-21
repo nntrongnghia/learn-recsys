@@ -7,11 +7,12 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchmetrics import RetrievalHitRate
 from pytorch_lightning.loggers import TensorBoardLogger
+from torchmetrics import RetrievalHitRate
 
+from lit_data import LitDataModule
 from lit_model import LitModel
-from ml100k import LitDataModule, ML100KSequence
+from ml100k import ML100KSequence
 from utils import bpr_loss
 
 

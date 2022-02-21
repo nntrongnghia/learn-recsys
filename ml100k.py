@@ -1,12 +1,12 @@
-from abc import ABC, abstractmethod
-from copy import deepcopy
 import os
+from copy import deepcopy
 from typing import Tuple
+
 import numpy as np
 import pandas as pd
-import pytorch_lightning as pl
-from torch import unbind
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import random_split
+
+from lit_data import BaseDataset
 
 
 def read_data_ml100k(data_dir="./ml-100k") -> pd.DataFrame:
@@ -15,20 +15,7 @@ def read_data_ml100k(data_dir="./ml-100k") -> pd.DataFrame:
     return data
 
 
-class BaseML100K(Dataset, ABC):
-    @abstractmethod
-    def split(self, *args, **kwargs) -> Tuple[Dataset, Dataset]:
-        """Split the dataset into train split
-        and test/validation split
-
-        Returns
-        -------
-        Tuple[Dataset, Dataset]
-            Two Dataset instances for training and validation/testing
-        """
-
-
-class ML100K(BaseML100K):
+class ML100K(BaseDataset):
     def __init__(self, data_dir="./ml-100k", normalize_rating=False):
         """MovieLens 100K for Matrix Factorization
         Each sample is a tuple of:
@@ -112,17 +99,17 @@ class ML100KRatingMatrix(ML100K):
 class ML100KPairWise(ML100K):
     def __init__(self, data_dir="./ml-100k",
                  test_leave_out=1,
-                 test_sample_size:int=None):
+                 test_sample_size: int = None):
         """Pair Wise loader to train NeuMF model.
         Samples are slightly different based on train/test mode.
-        
+
         In training mode:
         - user_id: int
         - item_id: int
             Item id that user has interacted with
         - neg_item: int
             Item id that user hasn't interacted with while training
-        
+
         In testing mode:
         - user_id: int
         - item_id: int
@@ -251,7 +238,7 @@ class ML100KSequence(ML100KPairWise):
             Target item id that user will interact with after the sequence
         - neg_item: int
             Item id that user doesn't interacted with while training
-        
+
         In testing mode:
         - user_id: int
         - seq: List[int]
@@ -364,46 +351,3 @@ class ML100KSequence(ML100KPairWise):
             return row.user_id, row.seq, row.target_item, neg_item
         else:
             return row.user_id, row.seq, row.item_id, row.is_pos
-
-
-class LitDataModule(pl.LightningDataModule):
-    def __init__(self, dataset: BaseML100K,
-                 train_ratio=0.8, batch_size=32,
-                 num_workers=2, prefetch_factor=16):
-        """DataModule for PyTorch Lightning
-
-        Parameters
-        ----------
-        dataset : BaseML100K
-        train_ratio : float, optional
-            By default 0.8
-        batch_size : int, optional
-            By default 32
-        num_workers : int, optional
-            Number of multi-CPU to fetch data
-            By default 2
-        prefetch_factor : int, optional
-            Number of batches to prefecth, by default 16
-        """
-        self.dataset = dataset
-        self.train_ratio = train_ratio
-        self.dataloader_kwargs = {
-            "batch_size": batch_size,
-            "num_workers": num_workers,
-            "prefetch_factor": prefetch_factor,
-        }
-
-    def setup(self):
-        self.num_users = self.dataset.num_users
-        self.num_items = self.dataset.num_items
-        self.train_split, self.test_split = self.dataset.split(
-            self.train_ratio)
-
-    def train_dataloader(self):
-        return DataLoader(self.train_split, **self.dataloader_kwargs, shuffle=True)
-
-    def val_dataloader(self):
-        return DataLoader(self.test_split, **self.dataloader_kwargs, shuffle=False)
-
-    def test_dataloader(self):
-        return DataLoader(self.test_split, **self.dataloader_kwargs, shuffle=False)

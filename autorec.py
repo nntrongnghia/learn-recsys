@@ -7,8 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.loggers import TensorBoardLogger
 
+from lit_data import LitDataModule
 from lit_model import LitModel
-from ml100k import LitDataModule, ML100KRatingMatrix
+from ml100k import ML100KRatingMatrix
 
 
 class AutoRec(nn.Module):

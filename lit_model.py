@@ -7,10 +7,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchmetrics import MeanSquaredError
 
-from ml100k import LitDataModule
+from lit_data import LitDataModule
+
 
 class LitModel(pl.LightningModule):
     """Template Lightning Module to train model"""
+
     def __init__(self, model_class, lr=0.002, **kwargs):
         super().__init__()
         self.save_hyperparameters()
@@ -18,7 +20,7 @@ class LitModel(pl.LightningModule):
         self.lr = lr
         self.sparse = getattr(self.model, "sparse", False)
         self.rmse = MeanSquaredError()
-        
+
     def configure_optimizers(self):
         if self.sparse:
             return torch.optim.SparseAdam(self.parameters(), self.lr)
@@ -47,13 +49,13 @@ class LitModel(pl.LightningModule):
 
     def training_epoch_end(self, outputs):
         avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        self.logger.experiment.add_scalar("train/loss", avg_loss, self.current_epoch)
-
+        self.logger.experiment.add_scalar(
+            "train/loss", avg_loss, self.current_epoch)
 
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack(outputs).mean()
-        self.logger.experiment.add_scalar("val/loss", avg_loss, self.current_epoch)
-        self.logger.experiment.add_scalar("val/rsme", self.rmse.compute(), self.current_epoch)
+        self.logger.experiment.add_scalar(
+            "val/loss", avg_loss, self.current_epoch)
+        self.logger.experiment.add_scalar(
+            "val/rsme", self.rmse.compute(), self.current_epoch)
         self.rmse.reset()
-
-

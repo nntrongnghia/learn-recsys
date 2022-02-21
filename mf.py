@@ -7,8 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.loggers import TensorBoardLogger
 
+from lit_data import LitDataModule
 from lit_model import LitModel
-from ml100k import ML100K, LitDataModule
+from ml100k import ML100K
 
 
 class MatrixFactorization(nn.Module):
