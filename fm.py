@@ -14,7 +14,7 @@ from ctr import CTRDataset
 
 
 class FactorizationMachine(nn.Module):
-    def __init__(self, feat_dims, embedding_dims):
+    def __init__(self, feat_dims, embedding_dims, **kwargs):
         super().__init__()
         num_inputs = int(sum(feat_dims))
         self.embedding = nn.Embedding(num_inputs, embedding_dims)
@@ -26,17 +26,21 @@ class FactorizationMachine(nn.Module):
             finally:
                 continue
 
-    def forward(self, x):
+    def forward(self, x, return_logit=False):
         v = self.embedding(x)
         interaction = 1/2*(v.sum(1)**2 - (v**2).sum(1)).sum(-1, keepdims=True)
         proj = self.proj(x).sum(1)
-        logit = self.fc(proj + interaction)
-        return torch.sigmoid(logit).flatten()
+        logit = self.fc(proj + interaction).flatten()
+        if return_logit:
+            return logit
+        else:
+            return torch.sigmoid(logit)
 
 
 class LitFM(pl.LightningModule):
     def __init__(self, lr=0.002, **kwargs):
         super().__init__()
+        print("LitFM")
         self.save_hyperparameters()
         self.model = FactorizationMachine(**kwargs)
         self.lr = lr

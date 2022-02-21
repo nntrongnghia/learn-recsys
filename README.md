@@ -21,7 +21,7 @@ Download these dataset and unzip in the root of this directory:
 7. Sequence-Aware Recommender Systems: [`caser.py`](caser.py)
 8. Feature-Rich Recommender Systems: [`ctr.py`](ctr.py) contains dataloaders for CTR dataset
 9. Factorization Machines: [`fm.py`](fm.py)
-10. Deep Factorization Machines: 
+10. Deep Factorization Machines: [`deepfm.py`](deepfm.py)
 
 ## Usage
 To train model in sections 3, 4, 6, 7, 9, 10, simply run `python corresponding_script.py`. Some hyperparameters like batch size, embedding dimension, etc. can be modified by arguments.
